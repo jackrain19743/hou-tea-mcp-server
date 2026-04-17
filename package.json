@@ -1,0 +1,52 @@
+{
+  "name": "@hou-tea/mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server for hou-tea.com — browse, recommend, and buy authentic Chinese tea via x402 USDC payments. Designed for Claude Desktop, Cursor, Cline, and any MCP-compatible AI agent.",
+  "type": "module",
+  "license": "MIT",
+  "homepage": "https://hou-tea.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hou-tea/hou-tea-mcp-server.git"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "x402",
+    "agent-commerce",
+    "chinese-tea",
+    "ai-agent",
+    "claude",
+    "cursor",
+    "usdc",
+    "stablecoin",
+    "agentic-payments"
+  ],
+  "bin": {
+    "hou-tea-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build",
+    "test": "tsx tests/smoke.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
