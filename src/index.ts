@@ -21,7 +21,7 @@ import {
 import { houTea, config } from "./client.js";
 
 const SERVER_NAME = "hou-tea";
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = "0.1.1";
 
 const server = new Server(
   {
@@ -155,7 +155,7 @@ const tools = [
   {
     name: "hou_tea_get_payment_requirements",
     description:
-      "Initiate an x402 USDC payment intent for a product. Returns HTTP 402-style payment requirements (recipient address, amount, Base chain network). The agent should then use a wallet MCP (e.g. @coinbase/payments-mcp) to send USDC and complete the order. This tool does NOT sign or send transactions.",
+      "Initiate an x402 USDC payment intent for a product. Returns HTTP 402-style payment requirements (recipient address, amount, Base chain network). Automatically includes buyer order grouping (`register_buyer_list_token` or `buyer_list_token` from env HOU_TEA_BUYER_LIST_TOKEN) so the same buyer can list orders via hou_tea_list_my_orders. The response includes `buy_request_body` — the wallet MCP MUST POST the identical JSON body on the retry (after payment) plus X-Payment. This tool does NOT sign or send transactions.",
     inputSchema: {
       type: "object",
       properties: {
@@ -175,6 +175,31 @@ const tools = [
         },
       },
       required: ["product_name", "unit_price"],
+    },
+  },
+  {
+    name: "hou_tea_list_my_orders",
+    description:
+      "List USDC/x402 orders associated with the buyer_list_token (same token returned on first successful purchase when register_buyer_list_token was used, or the value in env HOU_TEA_BUYER_LIST_TOKEN). Calls GET /api/v1/buyer/orders on the payment middleware — no merchant API key. Optional filters: status, limit, offset.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        buyer_list_token: {
+          type: "string",
+          description:
+            "Overrides HOU_TEA_BUYER_LIST_TOKEN for this call. If omitted, env HOU_TEA_BUYER_LIST_TOKEN must be set.",
+        },
+        status: {
+          type: "string",
+          description:
+            "Optional filter: pending_payment, confirmed, expired, cancelled, etc.",
+        },
+        limit: {
+          type: "integer",
+          description: "Page size 1–100 (default 20).",
+        },
+        offset: { type: "integer", description: "Pagination offset (default 0)." },
+      },
     },
   },
   {
@@ -267,6 +292,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         );
       }
 
+      case "hou_tea_list_my_orders":
+        return jsonResult(
+          await houTea.listMyOrders(args as unknown as Parameters<typeof houTea.listMyOrders>[0])
+        );
+
       case "hou_tea_check_order": {
         const { order_id } = args as { order_id: string };
         return jsonResult(await houTea.orderStatus(order_id));
@@ -289,7 +319,7 @@ async function main() {
   // MCP servers should not write to stdout (it's used by the protocol).
   // Logs go to stderr so Claude Desktop / Cursor can surface them.
   process.stderr.write(
-    `[hou-tea-mcp v${SERVER_VERSION}] connected. apiBase=${config.apiBase} storeId=${config.storeId} agentKey=${config.hasAgentKey ? "set" : "none"}\n`
+    `[hou-tea-mcp v${SERVER_VERSION}] connected. apiBase=${config.apiBase} storeId=${config.storeId} agentKey=${config.hasAgentKey ? "set" : "none"} buyerListToken=${config.hasBuyerListToken ? "set" : "none"} autoBuyerList=${config.autoRegisterBuyerListToken ? "on" : "off"}\n`
   );
 }
 

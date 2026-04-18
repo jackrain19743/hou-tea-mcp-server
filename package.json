@@ -1,6 +1,6 @@
 {
   "name": "@hou-tea/mcp-server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server for hou-tea.com — browse, recommend, and buy authentic Chinese tea via x402 USDC payments. Designed for Claude Desktop, Cursor, Cline, and any MCP-compatible AI agent.",
   "type": "module",
   "license": "MIT",

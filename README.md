@@ -17,7 +17,8 @@ Exposes the [hou-tea agent API](https://hou-tea.com/.well-known/agent) as MCP to
 | `hou_tea_explain` | Deep dive on one product: brewing guide, story, health info |
 | `hou_tea_compare` | Side-by-side comparison of 2–4 candidates |
 | `hou_tea_filter_by_health` | Filter by conditions: pregnant, insomnia, caffeine sensitive |
-| `hou_tea_get_payment_requirements` | Initiate x402 payment intent (returns recipient + amount) |
+| `hou_tea_get_payment_requirements` | Initiate x402 payment intent (returns recipient + amount; auto `register_buyer_list_token` / `buyer_list_token` for buyer order history) |
+| `hou_tea_list_my_orders` | List your x402 orders by `buyer_list_token` (Bearer; uses `HOU_TEA_BUYER_LIST_TOKEN` env) |
 | `hou_tea_check_order` | Poll order status after payment |
 | `hou_tea_agent_card` | Fetch full agent capability descriptor |
 
@@ -82,7 +83,7 @@ The agent will call `hou_tea_recommend`, return real products with prices and br
 
 > *"I'll take the first one."*
 
-The agent calls `hou_tea_get_payment_requirements`, gets back a 402 with the merchant's Base-chain USDC address and amount. If you've also installed `@coinbase/payments-mcp` with a funded wallet, it auto-signs and sends the USDC, then confirms the order.
+The agent calls `hou_tea_get_payment_requirements`, gets back a 402 with the merchant's Base-chain USDC address and amount, plus a `buy_request_body` field (includes `register_buyer_list_token` or your saved `buyer_list_token`). The **retry POST to `/pay/api/v1/buy` after paying must use that exact JSON body** plus the `X-Payment` header — otherwise buyer grouping breaks. If you've also installed `@coinbase/payments-mcp` with a funded wallet, configure it to forward the same body. After the first successful purchase, copy `buyer_list_token` from the JSON response into MCP env `HOU_TEA_BUYER_LIST_TOKEN` so `hou_tea_list_my_orders` and future checkouts stay under one identity.
 
 ---
 
@@ -96,8 +97,10 @@ All settings via environment variables (optional):
 | `HOU_TEA_PAY_BASE` | `https://hou-tea.com/pay` | Override x402 middleware host. |
 | `HOU_TEA_STORE_ID` | `fengshui` | Default store_id. |
 | `HOU_TEA_AGENT_KEY` | *(none)* | Optional `X-Agent-Key` for higher rate limits / private skills. Contact [support@hou-tea.com](mailto:support@hou-tea.com). |
+| `HOU_TEA_BUYER_LIST_TOKEN` | *(none)* | After first successful `/buy`, paste the `buyer_list_token` from the response. Future `hou_tea_get_payment_requirements` calls send this as `buyer_list_token`; enables `hou_tea_list_my_orders`. |
+| `HOU_TEA_AUTO_REGISTER_BUYER_LIST_TOKEN` | `true` | Set to `false` to stop sending `register_buyer_list_token` / `buyer_list_token` on `/buy` (legacy behavior). |
 
-Most users need none of these — the public catalog and x402 buy endpoint are open.
+Most users need none of these — the public catalog and x402 buy endpoint are open. For **buyer order history**, set `HOU_TEA_BUYER_LIST_TOKEN` once you have it from a confirmed purchase.
 
 ---
 
