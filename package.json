@@ -1,7 +1,7 @@
 {
   "name": "@hou-tea/mcp-server",
-  "version": "0.1.1",
-  "description": "MCP server for hou-tea.com — browse, recommend, and buy authentic Chinese tea via x402 USDC payments. Designed for Claude Desktop, Cursor, Cline, and any MCP-compatible AI agent.",
+  "version": "0.2.0-beta.0",
+  "description": "Agent-app MCP server for hou-tea.com — browse / recommend / buy authentic Chinese tea via x402 USDC, with progressive tool discovery, strict JSON Schemas, structured error model, request_id, and next_action hints.",
   "type": "module",
   "license": "MIT",
   "homepage": "https://hou-tea.com",
@@ -35,7 +35,10 @@
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "prepublishOnly": "npm run build",
-    "test": "tsx tests/smoke.ts"
+    "test:unit": "node tests/unit_response.mjs && node tests/unit_registry.mjs",
+    "test:smoke": "tsx tests/smoke.ts",
+    "test:mcp": "node tests/mcp_smoke.mjs",
+    "test": "npm run build && npm run test:unit"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",

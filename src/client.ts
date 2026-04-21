@@ -1,7 +1,11 @@
 /**
  * Thin HTTP client for the hou-tea agent API.
  * All endpoints are documented at https://hou-tea.com/.well-known/agent
+ *
+ * HTTP failures throw `HouTeaHttpError` (carries status + url) so the
+ * MCP dispatcher in index.ts can map them to a structured `error` envelope.
  */
+import { HouTeaHttpError, SERVER_VERSION } from "./response.js";
 
 const DEFAULT_BASE = process.env.HOU_TEA_API_BASE ?? "https://hou-tea.com";
 const DEFAULT_PAY_BASE = process.env.HOU_TEA_PAY_BASE ?? "https://hou-tea.com/pay";
@@ -33,7 +37,7 @@ function buildBuyBody(
   return body;
 }
 
-const USER_AGENT = "hou-tea-mcp/0.1.0 (+https://hou-tea.com)";
+const USER_AGENT = `hou-tea-mcp/${SERVER_VERSION} (+https://hou-tea.com)`;
 
 function authHeaders(): Record<string, string> {
   const h: Record<string, string> = {
@@ -48,7 +52,7 @@ async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { headers: authHeaders() });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`GET ${url} → HTTP ${res.status}: ${body.slice(0, 300)}`);
+    throw new HouTeaHttpError(res.status, url, body);
   }
   return (await res.json()) as T;
 }
@@ -61,7 +65,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`POST ${url} → HTTP ${res.status}: ${text.slice(0, 300)}`);
+    throw new HouTeaHttpError(res.status, url, text);
   }
   return (await res.json()) as T;
 }
@@ -187,7 +191,7 @@ export const houTea = {
     }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`POST ${url} → HTTP ${res.status}: ${text.slice(0, 300)}`);
+      throw new HouTeaHttpError(res.status, url, text);
     }
     return res.json();
   },
@@ -221,7 +225,7 @@ export const houTea = {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`GET ${url} → HTTP ${res.status}: ${text.slice(0, 300)}`);
+      throw new HouTeaHttpError(res.status, url, text);
     }
     return (await res.json()) as unknown;
   },

@@ -3,13 +3,24 @@
  * hou-tea MCP server
  *
  * Wraps https://hou-tea.com/.well-known/agent — exposes browse / recommend /
- * explain / compare / buy as MCP tools so any MCP-compatible AI agent
- * (Claude Desktop, Cursor, Cline, Continue, Zed, etc.) can shop authentic
+ * explain / buy / list-orders as MCP tools so any MCP-compatible AI agent
+ * (Claude Desktop, Cursor, Cline, Continue, Zed, …) can shop authentic
  * Chinese tea and pay with USDC via the x402 protocol.
  *
  * Pairs with @coinbase/payments-mcp (or any x402-capable wallet MCP) for
  * the actual on-chain USDC transfer. This MCP only handles browse + checkout
  * intent; the buyer wallet handles signing.
+ *
+ * v0.2.0 highlights (programmatic / agent-app surface):
+ *   - Tools split into core (always visible) + extended (revealed via
+ *     `hou_tea_discover_extended`) so default `tools/list` stays small.
+ *   - Strict JSON Schema (`additionalProperties: false`).
+ *   - Unified envelope: { ok, data?, error?, next_action?, meta }.
+ *   - Stable error codes (bad_request, unauthorized, not_found, conflict,
+ *     timeout, rate_limited, server_error, network_error, missing_buyer_list_token, …).
+ *   - `meta.request_id` on every response for traceability.
+ *   - `next_action[]` hints (e.g. recommend → explain → get_payment_requirements
+ *     → check_order → list_my_orders).
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -18,10 +29,21 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { houTea, config } from "./client.js";
-
-const SERVER_NAME = "hou-tea";
-const SERVER_VERSION = "0.1.1";
+import { config } from "./client.js";
+import {
+  classifyError,
+  SERVER_NAME,
+  SERVER_VERSION,
+  startCall,
+  wrapErr,
+  wrapOk,
+} from "./response.js";
+import {
+  EXTENDED_TOOL_NAMES,
+  extendedSummary,
+  getToolDef,
+  listForMcp,
+} from "./tools/registry.js";
 
 const server = new Server(
   {
@@ -30,300 +52,165 @@ const server = new Server(
   },
   {
     capabilities: {
-      tools: {},
+      tools: {
+        listChanged: true,
+      },
     },
   }
 );
 
-const tools = [
-  {
-    name: "hou_tea_browse",
-    description:
-      "Browse the hou-tea Chinese tea catalog. Returns products with name, price (USD/USDC), images, taste profile, fermentation level, season, and a ready-to-render `card` object. Filter by category, price range, season, or brewing difficulty.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        category: {
-          type: "string",
-          description:
-            "Optional category filter, e.g. 'green tea', 'oolong', 'pu-erh', 'white tea', 'black tea', 'yellow tea', 'dark tea'.",
-        },
-        price_min: { type: "number", description: "Minimum USD price." },
-        price_max: { type: "number", description: "Maximum USD price." },
-        season: {
-          type: "string",
-          description:
-            "Optional season suitability: 'spring', 'summer', 'autumn', 'winter'.",
-        },
-        difficulty: {
-          type: "string",
-          enum: ["beginner", "intermediate", "advanced"],
-          description: "Brewing difficulty level.",
-        },
-        per_page: {
-          type: "integer",
-          description: "Page size (default 20, max 100).",
-        },
-        page: { type: "integer", description: "Page number (1-indexed)." },
+const revealedExtended = new Set<string>();
+
+const DISCOVERY_TOOL_NAME = "hou_tea_discover_extended";
+const DISCOVERY_TOOL = {
+  name: DISCOVERY_TOOL_NAME,
+  description:
+    "[meta] Reveal extended tools (compare / health-filter / agent-card) by adding them to tools/list. Optionally filter by `groups` or specific `tools`. Call this when the core 6 tools aren't enough for the user's intent. Idempotent.",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      groups: {
+        type: "array",
+        items: { type: "string", enum: ["extended"] },
+        description: "Reveal all tools in these groups. Default: ['extended'].",
+      },
+      tools: {
+        type: "array",
+        items: { type: "string" },
+        description: "Reveal a specific subset of extended tools by name.",
       },
     },
+    additionalProperties: false,
   },
-  {
-    name: "hou_tea_recommend",
-    description:
-      "Get curated tea recommendations from a natural-language query. The server parses intent, applies semantic match, and returns ranked products with explanation. Use this whenever the user asks 'recommend me a tea for X' or describes a mood/occasion/use-case.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: {
-          type: "string",
-          description:
-            "Natural-language description, e.g. 'a warming tea for cold winter nights', 'gift for a tea beginner', 'something to pair with dim sum'.",
-        },
-        budget_max: {
-          type: "number",
-          description: "Optional maximum USD price per item.",
-        },
-        occasion: {
-          type: "string",
-          description:
-            "Optional occasion: 'gift', 'daily', 'meditation', 'dinner', 'office', 'study'.",
-        },
-        limit: {
-          type: "integer",
-          description: "Number of recommendations to return (default 3).",
-        },
-      },
-      required: ["query"],
-    },
-  },
-  {
-    name: "hou_tea_explain",
-    description:
-      "Get a deep explainer for one product: origin story, brewing guide (water temp, steep time, ratio), health benefits, talking points, cultural context, and cross-sell suggestions. Use after the user shows interest in a specific product.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        skill_id: {
-          type: "string",
-          description:
-            "The product's skill_id (returned as `card.id` from hou_tea_browse / hou_tea_recommend).",
-        },
-      },
-      required: ["skill_id"],
-    },
-  },
-  {
-    name: "hou_tea_compare",
-    description:
-      "Side-by-side comparison of 2–4 products across sensory profile, price, brewing difficulty, season, and use-case. Use when the user is choosing between specific candidates.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        skill_ids: {
-          type: "array",
-          items: { type: "string" },
-          minItems: 2,
-          maxItems: 4,
-          description: "List of 2–4 product skill_ids to compare.",
-        },
-      },
-      required: ["skill_ids"],
-    },
-  },
-  {
-    name: "hou_tea_filter_by_health",
-    description:
-      "Filter products by health constraints. Returns only teas safe under the given conditions (e.g. avoid caffeine for insomnia or pregnancy, avoid strong tannins for sensitive stomachs).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        conditions: {
-          type: "array",
-          items: { type: "string" },
-          description:
-            "Health conditions or constraints, e.g. ['pregnant', 'insomnia', 'children', 'caffeine_sensitive'].",
-        },
-        limit: {
-          type: "integer",
-          description: "Max results (default 10).",
-        },
-      },
-      required: ["conditions"],
-    },
-  },
-  {
-    name: "hou_tea_get_payment_requirements",
-    description:
-      "Initiate an x402 USDC payment intent for a product. Returns HTTP 402-style payment requirements (recipient address, amount, Base chain network). Automatically includes buyer order grouping (`register_buyer_list_token` or `buyer_list_token` from env HOU_TEA_BUYER_LIST_TOKEN) so the same buyer can list orders via hou_tea_list_my_orders. The response includes `buy_request_body` — the wallet MCP MUST POST the identical JSON body on the retry (after payment) plus X-Payment. This tool does NOT sign or send transactions.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        product_name: {
-          type: "string",
-          description:
-            "Exact product name as returned by hou_tea_browse (use card.name).",
-        },
-        unit_price: {
-          type: "string",
-          description:
-            "Unit price in USDC, decimal string e.g. '30.00'. Must match the catalog price; the merchant verifies on-chain.",
-        },
-        quantity: {
-          type: "integer",
-          description: "Number of units (default 1).",
-        },
-      },
-      required: ["product_name", "unit_price"],
-    },
-  },
-  {
-    name: "hou_tea_list_my_orders",
-    description:
-      "List USDC/x402 orders associated with the buyer_list_token (same token returned on first successful purchase when register_buyer_list_token was used, or the value in env HOU_TEA_BUYER_LIST_TOKEN). Calls GET /api/v1/buyer/orders on the payment middleware — no merchant API key. Optional filters: status, limit, offset.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        buyer_list_token: {
-          type: "string",
-          description:
-            "Overrides HOU_TEA_BUYER_LIST_TOKEN for this call. If omitted, env HOU_TEA_BUYER_LIST_TOKEN must be set.",
-        },
-        status: {
-          type: "string",
-          description:
-            "Optional filter: pending_payment, confirmed, expired, cancelled, etc.",
-        },
-        limit: {
-          type: "integer",
-          description: "Page size 1–100 (default 20).",
-        },
-        offset: { type: "integer", description: "Pagination offset (default 0)." },
-      },
-    },
-  },
-  {
-    name: "hou_tea_check_order",
-    description:
-      "Poll the status of a previously created order. Status transitions: pending_payment → confirmed (after on-chain USDC settlement is verified).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        order_id: {
-          type: "string",
-          description:
-            "Order ID returned by the merchant after a successful x402 payment, e.g. 'ord_abc123def456'.",
-        },
-      },
-      required: ["order_id"],
-    },
-  },
-  {
-    name: "hou_tea_agent_card",
-    description:
-      "Fetch the full hou-tea agent capability descriptor (/.well-known/agent). Useful for discovering the latest API surface, payment recipient address, and supported networks. Call this if other tools behave unexpectedly.",
-    inputSchema: { type: "object", properties: {} },
-  },
-];
+};
+
+function listTools() {
+  return [...listForMcp(revealedExtended), DISCOVERY_TOOL];
+}
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return { tools };
+  return { tools: listTools() };
 });
 
-function jsonResult(data: unknown) {
+function jsonResult(envelope: unknown) {
   return {
     content: [
       {
         type: "text" as const,
-        text: JSON.stringify(data, null, 2),
+        text: JSON.stringify(envelope, null, 2),
       },
     ],
+    ...(typeof envelope === "object" && envelope !== null && (envelope as Record<string, unknown>).ok === false
+      ? { isError: true }
+      : {}),
   };
 }
 
-function errorResult(err: unknown) {
-  const msg = err instanceof Error ? err.message : String(err);
-  return {
-    isError: true,
-    content: [
+async function handleDiscover(args: Record<string, unknown>) {
+  const ctx = startCall(DISCOVERY_TOOL_NAME);
+  const groups = Array.isArray(args.groups) ? (args.groups as string[]) : ["extended"];
+  const explicit = Array.isArray(args.tools) ? (args.tools as string[]) : undefined;
+
+  const before = new Set(revealedExtended);
+  if (groups.includes("extended")) {
+    if (explicit && explicit.length > 0) {
+      for (const n of explicit) {
+        if (EXTENDED_TOOL_NAMES.has(n)) revealedExtended.add(n);
+      }
+    } else {
+      for (const n of EXTENDED_TOOL_NAMES) revealedExtended.add(n);
+    }
+  }
+  const newlyRevealed = [...revealedExtended].filter((n) => !before.has(n));
+
+  // Notify any listening MCP clients that the tool list changed.
+  if (newlyRevealed.length > 0) {
+    try {
+      await server.sendToolListChanged();
+    } catch {
+      // notification is best-effort; older clients may not subscribe.
+    }
+  }
+
+  return jsonResult(
+    wrapOk(
+      ctx,
       {
-        type: "text" as const,
-        text: `hou-tea MCP error: ${msg}`,
+        revealed: [...revealedExtended],
+        newly_revealed: newlyRevealed,
+        available_extended: extendedSummary(),
       },
-    ],
-  };
+      newlyRevealed.length > 0
+        ? [
+            {
+              tool: "tools/list",
+              reason: "Re-list tools to see the newly revealed extended tools.",
+            },
+          ]
+        : undefined
+    )
+  );
 }
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args = {} } = request.params;
+  const { name, arguments: rawArgs = {} } = request.params;
+  const args = (rawArgs ?? {}) as Record<string, unknown>;
+
+  if (name === DISCOVERY_TOOL_NAME) {
+    return handleDiscover(args);
+  }
+
+  const def = getToolDef(name);
+  if (!def) {
+    const ctx = startCall(name);
+    return jsonResult(
+      wrapErr(ctx, {
+        code: "unknown_tool",
+        message: `Unknown tool: ${name}`,
+        retryable: false,
+        hint: `Call tools/list (and ${DISCOVERY_TOOL_NAME} for extended tools) to see available names.`,
+      })
+    );
+  }
+
+  if (def.group === "extended" && !revealedExtended.has(def.name)) {
+    const ctx = startCall(name);
+    return jsonResult(
+      wrapErr(ctx, {
+        code: "extended_not_revealed",
+        message: `Tool ${name} is in the 'extended' group and must be revealed first.`,
+        retryable: true,
+        hint: `Call ${DISCOVERY_TOOL_NAME} (with no args, or tools=['${name}']) to enable it, then retry.`,
+      })
+    );
+  }
+
+  const ctx = startCall(name);
   try {
-    switch (name) {
-      case "hou_tea_browse":
-        return jsonResult(await houTea.catalog(args as Parameters<typeof houTea.catalog>[0]));
-
-      case "hou_tea_recommend":
-        return jsonResult(
-          await houTea.recommend(args as unknown as Parameters<typeof houTea.recommend>[0])
-        );
-
-      case "hou_tea_explain": {
-        const { skill_id } = args as { skill_id: string };
-        return jsonResult(await houTea.explain(skill_id));
-      }
-
-      case "hou_tea_compare":
-        return jsonResult(
-          await houTea.compare(args as unknown as Parameters<typeof houTea.compare>[0])
-        );
-
-      case "hou_tea_filter_by_health": {
-        const { conditions, limit } = args as { conditions: string[]; limit?: number };
-        return jsonResult(await houTea.constraints({ conditions, limit }));
-      }
-
-      case "hou_tea_get_payment_requirements": {
-        const { product_name, unit_price, quantity } = args as {
-          product_name: string;
-          unit_price: string;
-          quantity?: number;
-        };
-        return jsonResult(
-          await houTea.paymentRequirements(product_name, unit_price, quantity ?? 1)
-        );
-      }
-
-      case "hou_tea_list_my_orders":
-        return jsonResult(
-          await houTea.listMyOrders(args as unknown as Parameters<typeof houTea.listMyOrders>[0])
-        );
-
-      case "hou_tea_check_order": {
-        const { order_id } = args as { order_id: string };
-        return jsonResult(await houTea.orderStatus(order_id));
-      }
-
-      case "hou_tea_agent_card":
-        return jsonResult(await houTea.agentCard());
-
-      default:
-        return errorResult(`Unknown tool: ${name}`);
-    }
+    const data = await def.execute(args);
+    const next = def.nextAction ? def.nextAction(args, data) : undefined;
+    return jsonResult(wrapOk(ctx, data, next));
   } catch (err) {
-    return errorResult(err);
+    return jsonResult(wrapErr(ctx, classifyError(err)));
   }
 });
 
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  // MCP servers should not write to stdout (it's used by the protocol).
+  // MCP servers must not write to stdout (it's the protocol channel).
   // Logs go to stderr so Claude Desktop / Cursor can surface them.
   process.stderr.write(
-    `[hou-tea-mcp v${SERVER_VERSION}] connected. apiBase=${config.apiBase} storeId=${config.storeId} agentKey=${config.hasAgentKey ? "set" : "none"} buyerListToken=${config.hasBuyerListToken ? "set" : "none"} autoBuyerList=${config.autoRegisterBuyerListToken ? "on" : "off"}\n`
+    `[${SERVER_NAME}-mcp v${SERVER_VERSION}] connected. apiBase=${config.apiBase} ` +
+      `payBase=${config.payBase} storeId=${config.storeId} agentKey=${
+        config.hasAgentKey ? "set" : "none"
+      } buyerListToken=${config.hasBuyerListToken ? "set" : "none"} autoBuyerList=${
+        config.autoRegisterBuyerListToken ? "on" : "off"
+      }\n`
   );
 }
 
 main().catch((err) => {
-  process.stderr.write(`[hou-tea-mcp] fatal: ${err}\n`);
+  process.stderr.write(`[${SERVER_NAME}-mcp] fatal: ${err}\n`);
   process.exit(1);
 });

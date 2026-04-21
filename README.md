@@ -1,26 +1,40 @@
 # @hou-tea/mcp-server
 
-> MCP server for [hou-tea.com](https://hou-tea.com) — let your AI agent browse, recommend, and **buy authentic Chinese tea with USDC** via the [x402 protocol](https://www.x402.org).
+> Agent-app MCP server for [hou-tea.com](https://hou-tea.com) — let your AI agent browse, recommend, and **buy authentic Chinese tea with USDC** via the [x402 protocol](https://www.x402.org).
 
 Designed for Claude Desktop, Cursor, Cline, Continue, Zed, and any [Model Context Protocol](https://modelcontextprotocol.io) compatible AI agent.
+
+> **v0.2.0-beta** — server now ships as an *agent app layer*, not just a tool list:
+> progressive tool discovery (core + extended), strict JSON Schemas, structured
+> response/error envelopes (`ok`, `data`, `error`, `next_action`, `meta.request_id`),
+> stable error codes, and explicit hand-off hints to wallet MCPs. See
+> [What changed in 0.2.0](#what-changed-in-020-beta) below.
 
 ---
 
 ## What it does
 
-Exposes the [hou-tea agent API](https://hou-tea.com/.well-known/agent) as MCP tools so your AI assistant can shop on your behalf:
+Exposes the [hou-tea agent API](https://hou-tea.com/.well-known/agent) as MCP tools so your AI assistant can shop on your behalf.
+
+**Default `tools/list` (core + meta) — always visible:**
 
 | Tool | What it does |
 |---|---|
 | `hou_tea_browse` | List tea catalog with filters (category, price, season, difficulty) |
 | `hou_tea_recommend` | Natural-language recommendations: "warming tea for cold winter nights" |
 | `hou_tea_explain` | Deep dive on one product: brewing guide, story, health info |
+| `hou_tea_get_payment_requirements` | Initiate x402 payment intent (returns recipient + amount; auto `register_buyer_list_token` / `buyer_list_token` for buyer order history) |
+| `hou_tea_check_order` | Poll order status after payment |
+| `hou_tea_list_my_orders` | List your x402 orders by `buyer_list_token` (Bearer; uses `HOU_TEA_BUYER_LIST_TOKEN` env) |
+| `hou_tea_discover_extended` | Reveal extended tools (compare / health-filter / agent-card) on demand |
+
+**Extended (revealed after `hou_tea_discover_extended`):**
+
+| Tool | What it does |
+|---|---|
 | `hou_tea_compare` | Side-by-side comparison of 2–4 candidates |
 | `hou_tea_filter_by_health` | Filter by conditions: pregnant, insomnia, caffeine sensitive |
-| `hou_tea_get_payment_requirements` | Initiate x402 payment intent (returns recipient + amount; auto `register_buyer_list_token` / `buyer_list_token` for buyer order history) |
-| `hou_tea_list_my_orders` | List your x402 orders by `buyer_list_token` (Bearer; uses `HOU_TEA_BUYER_LIST_TOKEN` env) |
-| `hou_tea_check_order` | Poll order status after payment |
-| `hou_tea_agent_card` | Fetch full agent capability descriptor |
+| `hou_tea_agent_card` | Fetch full agent capability descriptor (diagnostics) |
 
 **Payment is handled by an x402-capable wallet MCP** (e.g. [`@coinbase/payments-mcp`](https://github.com/coinbase/payments-mcp)) — this server only emits payment intents, it never holds keys or signs transactions.
 
@@ -134,7 +148,74 @@ cd hou-tea-mcp-server
 npm install
 npm run build
 node dist/index.js          # speaks MCP over stdio
+
+npm run test:unit           # offline unit tests (envelope + registry)
+npm run test:smoke          # live HTTP smoke (hits hou-tea.com)
+npm run test:mcp            # full MCP stdio smoke (build + spawn)
 ```
+
+---
+
+## What changed in 0.2.0-beta
+
+Anthropic's Skills + MCP guidance pushes MCP servers from "a flat list of tools"
+toward an **agent app layer**: progressive discovery, strict schemas,
+program-friendly responses, and explicit hand-off to other MCPs.
+This release brings that posture to `@hou-tea/mcp-server`:
+
+1. **Progressive tool discovery.** Default `tools/list` returns 6 core tools
+   + `hou_tea_discover_extended`. Extended tools (`hou_tea_compare`,
+   `hou_tea_filter_by_health`, `hou_tea_agent_card`) are revealed on demand.
+   Calling an extended tool before discovery returns a structured error:
+
+   ```json
+   { "ok": false,
+     "error": { "code": "extended_not_revealed",
+                "retryable": true,
+                "hint": "Call hou_tea_discover_extended …" } }
+   ```
+
+2. **Structured envelope on every call.**
+
+   ```json
+   {
+     "ok": true,
+     "data": { /* tool payload */ },
+     "next_action": [
+       { "tool": "hou_tea_explain", "reason": "...", "args_hint": { "skill_id": "..." } }
+     ],
+     "meta": { "request_id": "req_…", "tool": "hou_tea_recommend",
+               "took_ms": 412, "server_version": "0.2.0-beta.0" }
+   }
+   ```
+
+   Errors share the same envelope with `ok: false` and a stable `error.code`
+   (`bad_request`, `unauthorized`, `not_found`, `conflict`, `timeout`,
+   `rate_limited`, `server_error`, `network_error`,
+   `missing_buyer_list_token`, `extended_not_revealed`, `unknown_tool`,
+   `internal_error`). Each error also carries `retryable` and a `hint`.
+
+3. **Strict JSON Schema.** Every `inputSchema` sets
+   `additionalProperties: false`, with `required`, `enum`, `pattern`,
+   `minItems` / `maxItems` etc. — so agent-side validators can rely on it.
+
+4. **Hand-off hints to wallet MCP.** `hou_tea_get_payment_requirements`
+   returns the 402 `buy_request_body` plus a `next_action` block that points
+   the agent to an x402 wallet MCP (e.g. `@coinbase/payments-mcp`) and then
+   back to `hou_tea_check_order`.
+
+5. **Traceability.** Every response carries `meta.request_id` so you can
+   include it in support tickets / logs.
+
+This is a `next`-tagged beta; install with:
+
+```bash
+npm i @hou-tea/mcp-server@next
+# or, in MCP config: "args": ["-y", "@hou-tea/mcp-server@next"]
+```
+
+The 0.1.x line keeps working — tool names are unchanged, only the result
+shape and the default `tools/list` size are different.
 
 ---
 
