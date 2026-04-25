@@ -61,6 +61,13 @@ test("listForMcp by default exposes only core tools", () => {
   for (const n of EXTENDED_TOOL_NAMES) assert.ok(!names.includes(n), `leaked ${n}`);
 });
 
+test("core buying journey tools expose MCP Apps UI metadata", () => {
+  const byName = new Map(listForMcp(new Set()).map((t) => [t.name, t]));
+  assert.equal(byName.get("hou_tea_recommend")._meta.ui.resourceUri, "ui://hou-tea/tea-recommendation-grid.html");
+  assert.equal(byName.get("hou_tea_get_payment_requirements")._meta.ui.resourceUri, "ui://hou-tea/payment-review-card.html");
+  assert.equal(byName.get("hou_tea_list_my_orders")._meta.ui.resourceUri, "ui://hou-tea/order-timeline.html");
+});
+
 test("listForMcp reveals only the requested extended tools", () => {
   const list = listForMcp(new Set(["hou_tea_compare"]));
   const names = list.map((t) => t.name);

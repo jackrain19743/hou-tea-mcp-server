@@ -27,7 +27,9 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
+  ListResourcesRequestSchema,
   ListToolsRequestSchema,
+  ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { config } from "./client.js";
 import {
@@ -44,6 +46,7 @@ import {
   getToolDef,
   listForMcp,
 } from "./tools/registry.js";
+import { listUiResources, readUiResource } from "./ui_resources.js";
 
 const server = new Server(
   {
@@ -52,6 +55,7 @@ const server = new Server(
   },
   {
     capabilities: {
+      resources: {},
       tools: {
         listChanged: true,
       },
@@ -90,6 +94,26 @@ function listTools() {
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools: listTools() };
+});
+
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  return { resources: listUiResources() };
+});
+
+server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  const resource = readUiResource(request.params.uri);
+  if (!resource) {
+    throw new Error(`Unknown UI resource: ${request.params.uri}`);
+  }
+  return {
+    contents: [
+      {
+        uri: resource.uri,
+        mimeType: resource.mimeType,
+        text: resource.text,
+      },
+    ],
+  };
 });
 
 function jsonResult(envelope: unknown) {

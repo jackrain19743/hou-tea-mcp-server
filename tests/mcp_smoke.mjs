@@ -66,6 +66,24 @@ async function main() {
   const initialNames = initial.tools.map((t) => t.name);
   console.log(`\u2713 tools/list: ${initial.tools.length} tools (default)`);
   for (const t of initial.tools) console.log(`    - ${t.name}`);
+  const recommendTool = initial.tools.find((t) => t.name === "hou_tea_recommend");
+  if (recommendTool?._meta?.ui?.resourceUri !== "ui://hou-tea/tea-recommendation-grid.html") {
+    throw new Error("hou_tea_recommend missing MCP Apps UI metadata");
+  }
+
+  const resources = await send("resources/list", {});
+  const resourceUris = resources.resources.map((r) => r.uri);
+  if (!resourceUris.includes("ui://hou-tea/tea-recommendation-grid.html")) {
+    throw new Error("tea recommendation UI resource missing from resources/list");
+  }
+  const uiResource = await send("resources/read", { uri: "ui://hou-tea/tea-recommendation-grid.html" });
+  if (!uiResource.contents?.[0]?.text?.includes("Tea recommendations")) {
+    throw new Error("recommendation UI resource returned unexpected HTML");
+  }
+  if (!uiResource.contents?.[0]?.text?.includes("DESIGN.md")) {
+    throw new Error("recommendation UI resource missing DESIGN.md design contract note");
+  }
+  console.log(`\u2713 resources/list + resources/read expose MCP Apps UI`);
 
   // Default listing should hide extended tools.
   for (const ext of ["hou_tea_compare", "hou_tea_filter_by_health", "hou_tea_agent_card"]) {
