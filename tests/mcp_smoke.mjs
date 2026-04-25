@@ -77,11 +77,27 @@ async function main() {
     throw new Error("tea recommendation UI resource missing from resources/list");
   }
   const uiResource = await send("resources/read", { uri: "ui://hou-tea/tea-recommendation-grid.html" });
-  if (!uiResource.contents?.[0]?.text?.includes("Tea recommendations")) {
+  const uiText = uiResource.contents?.[0]?.text ?? "";
+  if (!uiText.includes("Tea recommendations")) {
     throw new Error("recommendation UI resource returned unexpected HTML");
   }
-  if (!uiResource.contents?.[0]?.text?.includes("DESIGN.md")) {
+  if (!uiText.includes("DESIGN.md")) {
     throw new Error("recommendation UI resource missing DESIGN.md design contract note");
+  }
+  const resourceContracts = [
+    ["ui://hou-tea/tea-recommendation-grid.html", "TeaRecommendationGrid"],
+    ["ui://hou-tea/payment-review-card.html", "PaymentReviewCard"],
+    ["ui://hou-tea/order-timeline.html", "OrderTimeline"],
+  ];
+  for (const [uri, component] of resourceContracts) {
+    const resource = await send("resources/read", { uri });
+    const text = resource.contents?.[0]?.text ?? "";
+    if (!text.includes('data-agent-schema="agent-ui/v1"')) {
+      throw new Error(`${uri} missing agent-ui/v1 contract marker`);
+    }
+    if (!text.includes(`data-agent-component="${component}"`)) {
+      throw new Error(`${uri} missing ${component} contract marker`);
+    }
   }
   console.log(`\u2713 resources/list + resources/read expose MCP Apps UI`);
 

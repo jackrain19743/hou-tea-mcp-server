@@ -14,7 +14,7 @@ const baseStyle = `
   .btn { display: inline-block; margin-top: 10px; padding: 8px 12px; border-radius: 999px; background: #86b45f; color: #11140f; font-weight: 700; }
 `;
 
-function html(title: string, body: string): string {
+function html(title: string, component: string, body: string): string {
   return `<!doctype html>
 <html>
 <head>
@@ -23,7 +23,7 @@ function html(title: string, body: string): string {
   <style>${baseStyle}</style>
 </head>
 <body>
-  <div class="wrap">
+  <div class="wrap" data-agent-schema="agent-ui/v1" data-agent-component="${component}">
     <h3>${title}</h3>
     ${body}
     <p class="muted">Styled according to Hou Tea DESIGN.md: calm, ritual, token-driven, no unsafe wallet handling.</p>
@@ -41,6 +41,7 @@ export const UI_RESOURCES: UiResource[] = [
     mimeType: "text/html",
     text: html(
       "Tea recommendations",
+      "TeaRecommendationGrid",
       `<div class="card"><strong>Recommendation Grid</strong><p class="muted">Use the tool result's recommendations/products array to render cards, images, prices, and explain/buy actions.</p></div>`
     ),
   },
@@ -51,6 +52,7 @@ export const UI_RESOURCES: UiResource[] = [
     mimeType: "text/html",
     text: html(
       "Payment review",
+      "PaymentReviewCard",
       `<div class="card"><strong>x402 payment intent</strong><p class="muted">Confirm amount, network, recipient, and retry body before handing off to an x402 wallet MCP.</p><span class="btn">Review payment</span></div>`
     ),
   },
@@ -61,6 +63,7 @@ export const UI_RESOURCES: UiResource[] = [
     mimeType: "text/html",
     text: html(
       "Order timeline",
+      "OrderTimeline",
       `<div class="card"><strong>Order status</strong><p class="muted">Render pending payment, verifying, confirmed, shipped, and tracking updates from the tool result.</p></div>`
     ),
   },
