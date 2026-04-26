@@ -4,11 +4,12 @@
 
 Designed for Claude Desktop, Cursor, Cline, Continue, Zed, and any [Model Context Protocol](https://modelcontextprotocol.io) compatible AI agent.
 
-> **v0.2.0-beta** — server now ships as an *agent app layer*, not just a tool list:
+> **v0.3.0-beta** - server now ships as an *agent app layer*, not just a tool list:
 > progressive tool discovery (core + extended), strict JSON Schemas, structured
 > response/error envelopes (`ok`, `data`, `error`, `next_action`, `meta.request_id`),
-> stable error codes, and explicit hand-off hints to wallet MCPs. See
-> [What changed in 0.2.0](#what-changed-in-020-beta) below.
+> stable error codes, explicit hand-off hints to wallet MCPs, and MCP Apps UI
+> metadata backed by the public `@hou-tea/agent-ui-contract` package. See
+> [What changed in 0.3.0](#what-changed-in-030-beta) below.
 
 ---
 
@@ -51,7 +52,7 @@ Edit `claude_desktop_config.json` (Settings → Developer → Edit Config):
   "mcpServers": {
     "hou-tea": {
       "command": "npx",
-      "args": ["-y", "@hou-tea/mcp-server"]
+      "args": ["-y", "@hou-tea/mcp-server@next"]
     },
     "coinbase-payments": {
       "command": "npx",
@@ -75,7 +76,7 @@ Add to `~/.cursor/mcp.json` or `<project>/.cursor/mcp.json`:
   "mcpServers": {
     "hou-tea": {
       "command": "npx",
-      "args": ["-y", "@hou-tea/mcp-server"]
+      "args": ["-y", "@hou-tea/mcp-server@next"]
     }
   }
 }
@@ -83,7 +84,36 @@ Add to `~/.cursor/mcp.json` or `<project>/.cursor/mcp.json`:
 
 ### Cline / Continue / Zed
 
-Same `npx -y @hou-tea/mcp-server` invocation in their MCP config.
+Same `npx -y @hou-tea/mcp-server@next` invocation in their MCP config.
+
+### Wallet MCP pairing
+
+Hou Tea emits x402 payment requirements, but it does not hold keys or sign
+transactions. For agent-native checkout, pair this MCP with an x402-capable
+wallet MCP such as `@coinbase/payments-mcp`:
+
+```json
+{
+  "mcpServers": {
+    "hou-tea": {
+      "command": "npx",
+      "args": ["-y", "@hou-tea/mcp-server@next"]
+    },
+    "coinbase-payments": {
+      "command": "npx",
+      "args": ["-y", "@coinbase/payments-mcp"],
+      "env": {
+        "EVM_PRIVATE_KEY": "0x..."
+      }
+    }
+  }
+}
+```
+
+Fund the wallet with Base USDC before asking the agent to buy. After the first
+successful purchase, copy the returned `buyer_list_token` into
+`HOU_TEA_BUYER_LIST_TOKEN` so future order history queries stay scoped to the
+same buyer identity.
 
 ---
 
@@ -115,6 +145,52 @@ All settings via environment variables (optional):
 | `HOU_TEA_AUTO_REGISTER_BUYER_LIST_TOKEN` | `true` | Set to `false` to stop sending `register_buyer_list_token` / `buyer_list_token` on `/buy` (legacy behavior). |
 
 Most users need none of these — the public catalog and x402 buy endpoint are open. For **buyer order history**, set `HOU_TEA_BUYER_LIST_TOKEN` once you have it from a confirmed purchase.
+
+---
+
+## Agent UI and MCP Apps
+
+The `next` beta exposes MCP Apps metadata for hosts that can render structured
+tool results. The shared UI contract is public:
+
+```bash
+npm i @hou-tea/agent-ui-contract
+```
+
+The contract currently defines:
+
+| Component | Used by |
+|---|---|
+| `TeaRecommendationGrid` | `hou_tea_browse`, `hou_tea_recommend` |
+| `PaymentReviewCard` | `hou_tea_get_payment_requirements` |
+| `OrderTimeline` | `hou_tea_check_order`, `hou_tea_list_my_orders` |
+
+Tool descriptors include `_meta.ui.component`, `_meta.ui.schemaVersion`,
+`_meta.ui.resourceUri`, and `_meta.ui.resultMappingId`. MCP hosts can read the
+matching resource URI and inspect the embedded `agent-ui/v1` manifest.
+
+Public discovery:
+
+- Agent Card: `https://hou-tea.com/.well-known/agent`
+- Agent App docs: `https://shop.hou-tea.com/agents`
+- UI schema JSON: `https://shop.hou-tea.com/api/agent-ui-contract`
+
+---
+
+## Troubleshooting
+
+- **Tools do not appear**: restart the host app after editing MCP config, then
+  run `npx -y @hou-tea/mcp-server@next --help` in a terminal to confirm npm can
+  download the package.
+- **Payment fails**: confirm the wallet MCP is installed separately, the wallet
+  has Base USDC, and the retry POST uses the exact `buy_request_body` returned
+  by `hou_tea_get_payment_requirements`.
+- **Order history is empty**: set `HOU_TEA_BUYER_LIST_TOKEN` from a confirmed
+  purchase response. Without it, `hou_tea_list_my_orders` cannot scope the
+  buyer safely.
+- **Corporate network blocks npm**: install once with
+  `npm i -g @hou-tea/mcp-server@next` and point the MCP config command to
+  `hou-tea-mcp`.
 
 ---
 
@@ -153,6 +229,38 @@ npm run test:unit           # offline unit tests (envelope + registry)
 npm run test:smoke          # live HTTP smoke (hits hou-tea.com)
 npm run test:mcp            # full MCP stdio smoke (build + spawn)
 ```
+
+---
+
+## What changed in 0.3.0-beta
+
+This release adds the public Agent UI protocol layer:
+
+1. **Public MCP Apps manifests.** Core buying tools now advertise UI metadata
+   through `_meta.ui`, including component name, `agent-ui/v1` schema version,
+   resource URI, and result mapping ID.
+
+2. **Shared npm contract.** `@hou-tea/agent-ui-contract` is published as the
+   single source of truth for component manifests, TypeScript types, MCP UI
+   resource names, and result mappings.
+
+3. **Manifest-backed UI resources.** MCP `resources/read` responses now embed
+   the exact component manifest in HTML so compatible hosts can render product
+   grids, payment review cards, and order timelines without scraping text.
+
+4. **External discovery surfaces.** The Agent Card and public `/agents` page
+   point agents and developers to npm packages, schema JSON, MCP install
+   snippets, and wallet pairing instructions.
+
+This is a `next`-tagged beta; install with:
+
+```bash
+npm i @hou-tea/mcp-server@next
+# or, in MCP config: "args": ["-y", "@hou-tea/mcp-server@next"]
+```
+
+The 0.1.x line keeps working - tool names are unchanged, but the `next` beta
+adds structured envelopes, progressive discovery, and UI metadata.
 
 ---
 
