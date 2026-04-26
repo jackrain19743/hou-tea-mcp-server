@@ -11,6 +11,11 @@
  */
 import { houTea } from "../client.js";
 import type { NextAction } from "../response.js";
+import {
+  AGENT_UI_SCHEMA_VERSION,
+  COMPONENT_MANIFESTS,
+  type AgentUiComponent,
+} from "@hou-tea/agent-ui-contract";
 
 export type ToolGroup = "core" | "extended";
 
@@ -20,7 +25,7 @@ export interface ToolDef {
   summary: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  uiResourceUri?: string;
+  uiComponent?: AgentUiComponent;
   execute: (args: Record<string, unknown>) => Promise<unknown>;
   nextAction?: (args: Record<string, unknown>, data: unknown) => NextAction[] | undefined;
 }
@@ -88,7 +93,7 @@ const CORE_TOOLS: ToolDef[] = [
     summary: "Browse hou-tea catalog (filter by category / price / season / difficulty).",
     description:
       "Browse the hou-tea Chinese tea catalog. Returns products with name, price (USD/USDC), images, taste profile, fermentation level, season, and a ready-to-render `card` object.",
-    uiResourceUri: "ui://hou-tea/tea-recommendation-grid.html",
+    uiComponent: "TeaRecommendationGrid",
     inputSchema: obj({
       category: { type: "string" },
       price_min: { type: "number", minimum: 0 },
@@ -117,7 +122,7 @@ const CORE_TOOLS: ToolDef[] = [
     summary: "Natural-language recommendation (mood / use-case / budget).",
     description:
       "Get curated tea recommendations from a natural-language query. Returns ranked products with explanation. Best entry point when the user asks 'recommend me a tea for X' or describes a mood / occasion / use-case.",
-    uiResourceUri: "ui://hou-tea/tea-recommendation-grid.html",
+    uiComponent: "TeaRecommendationGrid",
     inputSchema: obj(
       {
         query: { type: "string", minLength: 1 },
@@ -190,7 +195,7 @@ const CORE_TOOLS: ToolDef[] = [
     summary: "x402 buy intent → returns 402 requirements + buy_request_body.",
     description:
       "Initiate an x402 USDC payment intent for a product. Returns HTTP 402-style payment requirements (recipient address, amount, Base chain network). Auto-includes buyer order grouping (`register_buyer_list_token` or env HOU_TEA_BUYER_LIST_TOKEN). The wallet MCP MUST POST the identical `buy_request_body` on retry plus header `X-Payment`.",
-    uiResourceUri: "ui://hou-tea/payment-review-card.html",
+    uiComponent: "PaymentReviewCard",
     inputSchema: obj(
       {
         product_name: { type: "string", minLength: 1 },
@@ -242,7 +247,7 @@ const CORE_TOOLS: ToolDef[] = [
     summary: "Poll order status (pending_payment → confirmed).",
     description:
       "Poll the status of a previously created order. Status transitions: pending_payment → verifying → confirmed (after on-chain USDC settlement). Use exponential backoff (~2s, 4s, 8s …, max ~60s).",
-    uiResourceUri: "ui://hou-tea/order-timeline.html",
+    uiComponent: "OrderTimeline",
     inputSchema: obj({ order_id: { type: "string", minLength: 1 } }, ["order_id"]),
     execute: (args) => houTea.orderStatus(String((args as Record<string, unknown>).order_id)),
     nextAction: (_args, data) => {
@@ -265,7 +270,7 @@ const CORE_TOOLS: ToolDef[] = [
     summary: "List orders linked to buyer_list_token (Bearer auth).",
     description:
       "List USDC/x402 orders associated with the buyer_list_token (returned from a successful purchase or stored in env HOU_TEA_BUYER_LIST_TOKEN). No merchant API key required.",
-    uiResourceUri: "ui://hou-tea/order-timeline.html",
+    uiComponent: "OrderTimeline",
     inputSchema: obj({
       buyer_list_token: { type: "string" },
       status: { type: "string" },
@@ -356,11 +361,14 @@ export function listForMcp(includeExtended: Set<string>): Array<{
     name: t.name,
     description: `[${t.group}] ${t.description}`,
     inputSchema: t.inputSchema,
-    ...(t.uiResourceUri
+    ...(t.uiComponent
       ? {
           _meta: {
             ui: {
-              resourceUri: t.uiResourceUri,
+              component: t.uiComponent,
+              schemaVersion: AGENT_UI_SCHEMA_VERSION,
+              resourceUri: COMPONENT_MANIFESTS[t.uiComponent].resourceUri,
+              resultMappingId: COMPONENT_MANIFESTS[t.uiComponent].resultMappingId,
               preferredSize: "inline",
             },
           },

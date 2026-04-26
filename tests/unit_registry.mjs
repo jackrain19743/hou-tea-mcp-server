@@ -64,8 +64,15 @@ test("listForMcp by default exposes only core tools", () => {
 test("core buying journey tools expose MCP Apps UI metadata", () => {
   const byName = new Map(listForMcp(new Set()).map((t) => [t.name, t]));
   assert.equal(byName.get("hou_tea_recommend")._meta.ui.resourceUri, "ui://hou-tea/tea-recommendation-grid.html");
+  assert.equal(byName.get("hou_tea_recommend")._meta.ui.component, "TeaRecommendationGrid");
+  assert.equal(byName.get("hou_tea_recommend")._meta.ui.schemaVersion, "agent-ui/v1");
+  assert.equal(byName.get("hou_tea_recommend")._meta.ui.resultMappingId, "hou_tea.products");
   assert.equal(byName.get("hou_tea_get_payment_requirements")._meta.ui.resourceUri, "ui://hou-tea/payment-review-card.html");
+  assert.equal(byName.get("hou_tea_get_payment_requirements")._meta.ui.component, "PaymentReviewCard");
+  assert.equal(byName.get("hou_tea_get_payment_requirements")._meta.ui.resultMappingId, "hou_tea.payment_review");
   assert.equal(byName.get("hou_tea_list_my_orders")._meta.ui.resourceUri, "ui://hou-tea/order-timeline.html");
+  assert.equal(byName.get("hou_tea_list_my_orders")._meta.ui.component, "OrderTimeline");
+  assert.equal(byName.get("hou_tea_list_my_orders")._meta.ui.resultMappingId, "hou_tea.orders");
 });
 
 test("listForMcp reveals only the requested extended tools", () => {

@@ -70,6 +70,12 @@ async function main() {
   if (recommendTool?._meta?.ui?.resourceUri !== "ui://hou-tea/tea-recommendation-grid.html") {
     throw new Error("hou_tea_recommend missing MCP Apps UI metadata");
   }
+  if (recommendTool?._meta?.ui?.schemaVersion !== "agent-ui/v1") {
+    throw new Error("hou_tea_recommend missing agent-ui/v1 metadata");
+  }
+  if (recommendTool?._meta?.ui?.resultMappingId !== "hou_tea.products") {
+    throw new Error("hou_tea_recommend missing result mapping metadata");
+  }
 
   const resources = await send("resources/list", {});
   const resourceUris = resources.resources.map((r) => r.uri);
@@ -97,6 +103,15 @@ async function main() {
     }
     if (!text.includes(`data-agent-component="${component}"`)) {
       throw new Error(`${uri} missing ${component} contract marker`);
+    }
+    if (!text.includes('id="agent-ui-manifest"')) {
+      throw new Error(`${uri} missing embedded agent-ui manifest`);
+    }
+    if (!text.includes(`"component":"${component}"`)) {
+      throw new Error(`${uri} manifest missing component ${component}`);
+    }
+    if (!text.includes('"resultMappingId"')) {
+      throw new Error(`${uri} manifest missing resultMappingId`);
     }
   }
   console.log(`\u2713 resources/list + resources/read expose MCP Apps UI`);

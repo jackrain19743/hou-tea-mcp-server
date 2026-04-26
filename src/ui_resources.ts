@@ -1,3 +1,10 @@
+import {
+  AGENT_UI_COMPONENTS,
+  AGENT_UI_SCHEMA_VERSION,
+  COMPONENT_MANIFESTS,
+  type AgentUiComponent,
+} from "@hou-tea/agent-ui-contract";
+
 export interface UiResource {
   uri: string;
   name: string;
@@ -14,7 +21,30 @@ const baseStyle = `
   .btn { display: inline-block; margin-top: 10px; padding: 8px 12px; border-radius: 999px; background: #86b45f; color: #11140f; font-weight: 700; }
 `;
 
-function html(title: string, component: string, body: string): string {
+const resourceBodies: Record<AgentUiComponent, { title: string; name: string; description: string; body: string }> = {
+  TeaRecommendationGrid: {
+    title: "Tea recommendations",
+    name: "Hou Tea Recommendation Grid",
+    description: "Displays product recommendations and follow-up actions.",
+    body: `<div class="card"><strong>Recommendation Grid</strong><p class="muted">Use the tool result's recommendations/products array to render cards, images, prices, and explain/buy actions.</p></div>`,
+  },
+  PaymentReviewCard: {
+    title: "Payment review",
+    name: "Hou Tea Payment Review",
+    description: "Reviews x402 payment requirements before wallet handoff.",
+    body: `<div class="card"><strong>x402 payment intent</strong><p class="muted">Confirm amount, network, recipient, and retry body before handing off to an x402 wallet MCP.</p><span class="btn">Review payment</span></div>`,
+  },
+  OrderTimeline: {
+    title: "Order timeline",
+    name: "Hou Tea Order Timeline",
+    description: "Displays order status, payment state, and tracking progress.",
+    body: `<div class="card"><strong>Order status</strong><p class="muted">Render pending payment, verifying, confirmed, shipped, and tracking updates from the tool result.</p></div>`,
+  },
+};
+
+function html(component: AgentUiComponent): string {
+  const body = resourceBodies[component];
+  const manifest = COMPONENT_MANIFESTS[component];
   return `<!doctype html>
 <html>
 <head>
@@ -23,51 +53,24 @@ function html(title: string, component: string, body: string): string {
   <style>${baseStyle}</style>
 </head>
 <body>
-  <div class="wrap" data-agent-schema="agent-ui/v1" data-agent-component="${component}">
-    <h3>${title}</h3>
-    ${body}
+  <div class="wrap" data-agent-schema="${AGENT_UI_SCHEMA_VERSION}" data-agent-component="${component}">
+    <h3>${body.title}</h3>
+    ${body.body}
     <p class="muted">Styled according to Hou Tea DESIGN.md: calm, ritual, token-driven, no unsafe wallet handling.</p>
     <p class="muted">If your MCP host does not pass tool results into Apps yet, use the JSON result shown in chat.</p>
+    <script type="application/json" id="agent-ui-manifest">${JSON.stringify(manifest)}</script>
   </div>
 </body>
 </html>`;
 }
 
-export const UI_RESOURCES: UiResource[] = [
-  {
-    uri: "ui://hou-tea/tea-recommendation-grid.html",
-    name: "Hou Tea Recommendation Grid",
-    description: "Displays product recommendations and follow-up actions.",
-    mimeType: "text/html",
-    text: html(
-      "Tea recommendations",
-      "TeaRecommendationGrid",
-      `<div class="card"><strong>Recommendation Grid</strong><p class="muted">Use the tool result's recommendations/products array to render cards, images, prices, and explain/buy actions.</p></div>`
-    ),
-  },
-  {
-    uri: "ui://hou-tea/payment-review-card.html",
-    name: "Hou Tea Payment Review",
-    description: "Reviews x402 payment requirements before wallet handoff.",
-    mimeType: "text/html",
-    text: html(
-      "Payment review",
-      "PaymentReviewCard",
-      `<div class="card"><strong>x402 payment intent</strong><p class="muted">Confirm amount, network, recipient, and retry body before handing off to an x402 wallet MCP.</p><span class="btn">Review payment</span></div>`
-    ),
-  },
-  {
-    uri: "ui://hou-tea/order-timeline.html",
-    name: "Hou Tea Order Timeline",
-    description: "Displays order status, payment state, and tracking progress.",
-    mimeType: "text/html",
-    text: html(
-      "Order timeline",
-      "OrderTimeline",
-      `<div class="card"><strong>Order status</strong><p class="muted">Render pending payment, verifying, confirmed, shipped, and tracking updates from the tool result.</p></div>`
-    ),
-  },
-];
+export const UI_RESOURCES: UiResource[] = AGENT_UI_COMPONENTS.map((component) => ({
+  uri: COMPONENT_MANIFESTS[component].resourceUri,
+  name: resourceBodies[component].name,
+  description: resourceBodies[component].description,
+  mimeType: "text/html",
+  text: html(component),
+}));
 
 export function listUiResources() {
   return UI_RESOURCES.map(({ uri, name, description, mimeType }) => ({
